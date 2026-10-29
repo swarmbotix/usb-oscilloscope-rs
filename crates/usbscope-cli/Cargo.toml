@@ -1,0 +1,19 @@
+[package]
+name = "usbscope-cli"
+description = "Command-line tool for the Hantek 1008/1008C USB oscilloscope"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "usbscope"
+path = "src/main.rs"
+
+[dependencies]
+usbscope-proto.workspace = true
+usbscope-usb.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true

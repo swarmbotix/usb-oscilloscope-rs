@@ -1,0 +1,15 @@
+# Rust
+/target/
+/dist/
+**/*.rs.bk
+
+# Flutter / Android (phase 5)
+/app/build/
+/app/.dart_tool/
+/app/android/.gradle/
+/app/android/local.properties
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp

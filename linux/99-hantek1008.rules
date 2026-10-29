@@ -1,0 +1,18 @@
+# udev rule for the Hantek 1008 / 1008C USB oscilloscope (USB ID 0783:5725).
+#
+# Lets ordinary users open the scope, so `usbscope` works without sudo.
+#
+# Install (see docs/setup-linux.md):
+#   sudo cp 99-hantek1008.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   (then unplug and replug the scope)
+#
+# MODE="0666" makes the device node readable and writable by every user.
+# TAG+="uaccess" additionally grants access to the user logged in at the local seat
+# through systemd-logind ACLs. Note that systemd only honours the uaccess tag for rules
+# that sort before 73-seat-late.rules, so in this 99- file the MODE line does the actual
+# work. If you prefer seat-only access, rename the file to 70-hantek1008.rules and remove
+# MODE="0666".
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="0783", ATTR{idProduct}=="5725", MODE="0666", TAG+="uaccess"

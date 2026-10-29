@@ -1,0 +1,225 @@
+# Build, lint and test for every supported target.
+# Hardware tests cannot run in CI; see docs/hardware-test-checklist.md.
+
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            exe: ""
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            exe: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            exe: ".exe"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            exe: ""
+          - os: macos-latest # Apple Silicon runner cross-compiling for Intel Macs
+            target: x86_64-apple-darwin
+            cross: false
+            exe: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Ensure target for the workspace toolchain
+        # If rust-toolchain.toml selects a toolchain other than "stable", the target added
+        # above would not apply to it. This is a no-op when they are the same.
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build (cargo)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release -p usbscope-cli --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: ${{ matrix.cross }}
+        run: cross build --release -p usbscope-cli --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="usbscope-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/usbscope${{ matrix.exe }}" "dist/$name/"
+          cp README.md "dist/$name/"
+          case "${{ matrix.target }}" in
+            *-windows-*)
+              cp windows/hantek1008-winusb.inf "dist/$name/"
+              cp windows/README.md "dist/$name/WINDOWS-DRIVER.md"
+              (cd dist && 7z a -tzip "$name.zip" "$name")
+              ;;
+            *-linux-*)
+              cp linux/99-hantek1008.rules "dist/$name/"
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+              ;;
+            *)
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+              ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: usbscope-${{ matrix.target }}
+          path: |
+            dist/usbscope-${{ matrix.target }}.zip
+            dist/usbscope-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: android (cargo-ndk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Ensure targets for the workspace toolchain
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: android
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27d
+          add-to-path: false
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build usbscope-usb for Android ABIs
+        # usbscope-usb is a plain Rust library (rlib), so this produces no .so files yet;
+        # it proves the transport compiles for every Android ABI. cargo-ndk's `-o <dir>`
+        # option exits with an error when the crate has no cdylib, so it is only used in
+        # the next step, once the FFI crate (usbscope-ffi, PLAN.md phase 3) exists.
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 build --release -p usbscope-usb
+
+      - name: Build usbscope-ffi shared libraries
+        if: ${{ hashFiles('crates/usbscope-ffi/Cargo.toml') != '' }}
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o target/jniLibs build --release -p usbscope-ffi
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [ -d target/jniLibs ] && [ -n "$(find target/jniLibs -name '*.so' -print -quit)" ]; then
+            tar -C target -czf dist/usbscope-android-jniLibs.tar.gz jniLibs
+            ls -l dist
+          else
+            echo "No .so files produced yet (no cdylib crate); nothing to upload."
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: usbscope-android
+          path: dist/usbscope-android-jniLibs.tar.gz
+          if-no-files-found: warn
+
+  release:
+    name: GitHub release
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: [check, build, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        # No checkout in this job, so the workspace subdirectory does not exist.
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: usbscope-*
+          path: dist
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -l dist
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

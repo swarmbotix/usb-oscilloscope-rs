@@ -1,0 +1,13 @@
+[package]
+name = "usbscope-usb"
+description = "USB transport (nusb) for the Hantek 1008/1008C oscilloscope"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+usbscope-proto.workspace = true
+nusb.workspace = true
+thiserror.workspace = true
+log.workspace = true

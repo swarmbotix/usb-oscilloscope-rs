@@ -1,0 +1,64 @@
+; hantek1008-winusb.inf
+;
+; Binds the Hantek 1008 / 1008C USB oscilloscope (USB\VID_0783&PID_5725) to Microsoft's
+; inbox WinUSB driver (winusb.sys), so the usbscope tool can talk to it. This REPLACES the
+; vendor driver (STM32MS.sys / HANTEK1008*.sys): while this INF is in use, Hantek's
+; Scope.exe cannot see the device. See README.md in this folder for how to install it and
+; how to switch back.
+;
+; This package is NOT signed. Windows (x64/ARM64) only installs it once you generate a
+; catalog (hantek1008-winusb.cat) and sign it with a certificate your machine trusts.
+; Zadig does exactly that automatically and is the easier route.
+;
+; Supported: Windows 10 and 11. No KMDF co-installer section is included, so Windows 7/8
+; are not supported by this file (use Zadig there).
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = USBDevice
+ClassGuid   = {88BAE032-5A81-49f0-BC3D-A4FF138216D6}
+Provider    = %ProviderName%
+CatalogFile = hantek1008-winusb.cat
+DriverVer   = 10/29/2026,1.0.0.0
+PnpLockdown = 1
+
+; ========== Manufacturer / Models ==========
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64,NTarm64,NTx86
+
+[Standard.NTamd64]
+%DeviceName% = USB_Install, USB\VID_0783&PID_5725
+
+[Standard.NTarm64]
+%DeviceName% = USB_Install, USB\VID_0783&PID_5725
+
+[Standard.NTx86]
+%DeviceName% = USB_Install, USB\VID_0783&PID_5725
+
+; ========== Installation ==========
+; Everything is delegated to the inbox winusb.inf; no files are copied.
+
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+[Dev_AddReg]
+; Device interface GUID chosen for this project (REG_MULTI_SZ = 0x00010000).
+; It is deliberately different from the vendor driver's
+; {4B6C73B2-015B-4855-8BB1-A7A6C03AFA87} so the two bindings cannot be confused.
+HKR,,DeviceInterfaceGUIDs,0x00010000,"{CC98A91A-480F-413D-8434-B06FCA44EDC0}"
+
+; ========== Strings ==========
+
+[Strings]
+ProviderName     = "usb-oscilloscope-rs"
+ManufacturerName = "Hantek (WinUSB, usb-oscilloscope-rs)"
+DeviceName       = "Hantek 1008 USB Oscilloscope (WinUSB)"
